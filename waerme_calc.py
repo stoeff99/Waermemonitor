@@ -146,12 +146,34 @@ class Calculator:
     def input_specs(self):
         """Alle konfigurierten Eingänge als {Diagnose-Name: Spec}."""
         specs = {k: v for k, v in self.t.items() if v}
-        for i, z in enumerate((self.c.get("speicher") or {}).get("zonen") or []):
+        for i, z in enumerate(self._zonen()):
             specs[f"speicher_{i}"] = z["topic"]
-        for r in (self.c.get("flaeche") or {}).get("raeume") or []:
+        for r in self._raeume():
             specs[f"boden_{r['name']}"] = r["t_boden"]
             specs[f"raum_{r['name']}"] = r["t_raum"]
         return specs
+
+    def _zonen(self):
+        """Speicherzonen mit gültigem Topic und Volumen (Zonen mit topic: null werden ignoriert)."""
+        out = []
+        for z in (self.c.get("speicher") or {}).get("zonen") or []:
+            if isinstance(z, dict) and z.get("topic") and z.get("liter"):
+                out.append(z)
+            elif not getattr(self, "_warned_zonen", False):
+                log.warning("Speicherzone ohne topic/liter wird ignoriert: %s", z)
+        self._warned_zonen = True
+        return out
+
+    def _raeume(self):
+        """Räume mit Name, Fläche und beiden Topics (unvollständige werden ignoriert)."""
+        out = []
+        for r in (self.c.get("flaeche") or {}).get("raeume") or []:
+            if isinstance(r, dict) and r.get("name") and r.get("m2") and r.get("t_boden") and r.get("t_raum"):
+                out.append(r)
+            elif not getattr(self, "_warned_raeume", False):
+                log.warning("Raum unvollständig, wird ignoriert: %s", r)
+        self._warned_raeume = True
+        return out
 
     def input_topics(self):
         return sorted({split_spec(s)[0] for s in self.input_specs().values()})
@@ -211,7 +233,7 @@ class Calculator:
 
     def _flaeche(self, now):
         f = self.c.get("flaeche") or {}
-        raeume = f.get("raeume") or []
+        raeume = self._raeume()
         if not raeume:
             return None
         k = float(f.get("k_w_m2k", 10.8))
@@ -225,7 +247,7 @@ class Calculator:
 
     def _speicher(self, now):
         s = self.c.get("speicher") or {}
-        zonen = s.get("zonen") or []
+        zonen = self._zonen()
         if not zonen:
             return None
         tref = float(s.get("t_ref", 10.0))
