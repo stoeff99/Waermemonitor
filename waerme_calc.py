@@ -98,9 +98,21 @@ def extract(payload, key=None):
 class Inputs:
     """Letzte Werte pro Eingang (Spec = 'topic' oder 'topic#json.pfad') mit Zeitstempel."""
 
-    def __init__(self, max_age):
+    def __init__(self, max_age, max_age_spec=None):
         self.max_age = max_age
+        self.max_age_spec = dict(max_age_spec or {})  # Spec -> Sekunden oder None (= unbegrenzt)
         self.v = {}
+
+    def limit(self, spec):
+        return self.max_age_spec.get(spec, self.max_age)
+
+    def stale(self, spec, now):
+        """True, wenn nie empfangen oder älter als das Limit dieses Eingangs."""
+        x = self.v.get(spec)
+        if x is None:
+            return True
+        lim = self.limit(spec)
+        return lim is not None and now - x[1] > lim
 
     def set(self, spec, val, now):
         self.v[spec] = (val, now)
@@ -118,10 +130,9 @@ class Inputs:
     def get(self, spec, now):
         if not spec:
             return None
-        x = self.v.get(spec)
-        if x is None or now - x[1] > self.max_age:
+        if self.stale(spec, now):
             return None
-        return x[0]
+        return self.v[spec][0]
 
 
 class Calculator:
@@ -132,7 +143,7 @@ class Calculator:
         self.off = self.c.get("offsets_k", {}) or {}
         self.tz = ZoneInfo(self.c.get("timezone", "Europe/Zurich"))
         self.tick_s = float(self.c.get("tick_s", 10))
-        self.inp = Inputs(float(self.c.get("max_age_s", 180)))
+        self.inp = Inputs(float(self.c.get("max_age_s", 180)), self._max_age_spec())
         st = state or {}
         self.counters = {k: float(st.get("counters", {}).get(k, 0.0)) for k in COUNTERS}
         self.last_counter_in = dict(st.get("last_counter_in", {}))
@@ -152,6 +163,27 @@ class Calculator:
             specs[f"boden_{r['name']}"] = r["t_boden"]
             specs[f"raum_{r['name']}"] = r["t_raum"]
         return specs
+
+    def _max_age_spec(self):
+        """max_age_pro_eingang {Name: Sekunden | null} auf Specs abbilden.
+
+        null = unbegrenzt (Quelle sendet nur bei Änderung). Teilen sich mehrere Namen
+        einen Spec, gilt das grosszügigste Limit.
+        """
+        over = self.c.get("max_age_pro_eingang") or {}
+        specs = self.input_specs()
+        out = {}
+        for name, lim in over.items():
+            spec = specs.get(name)
+            if spec is None:
+                log.warning("max_age_pro_eingang: unbekannter Eingang '%s' wird ignoriert", name)
+                continue
+            lim = None if lim is None else float(lim)
+            if spec in out:
+                old = out[spec]
+                lim = None if old is None or lim is None else max(old, lim)
+            out[spec] = lim
+        return out
 
     def _zonen(self):
         """Speicherzonen mit gültigem Topic und Volumen (Zonen mit topic: null werden ignoriert)."""
@@ -199,7 +231,7 @@ class Calculator:
         for name, spec in self.input_specs().items():
             age = self.inp.age(spec, now)
             diag[f"alter_{name}"] = -1 if age is None else round(age)
-            if age is None or age > self.inp.max_age:
+            if self.inp.stale(spec, now):
                 fehlend.append(f"{name} ({spec})")
         for m in ("fbh", "prim", "flaeche", "wp"):
             diag[f"methode_{m}"] = 0 if self.power.get(m) is None else 1

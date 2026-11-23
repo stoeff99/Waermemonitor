@@ -73,6 +73,10 @@ Mehrere Werte aus demselben JSON-Topic sind möglich, z. B. `haus/fbh#vl` und `h
 Ein Eingang, der fehlt oder auf `null` steht, schadet nicht. Die zugehörige Methode rechnet dann
 einfach nicht. Ein Wert gilt als **veraltet**, wenn er länger als `max_age_s` (180 s) nicht
 aktualisiert wurde. Die Quellen sollten also mindestens jede Minute senden, nicht nur bei Änderung.
+Sendet eine Quelle nur bei Änderung (z.B. ioBroker, Pumpensignale 0/1), setzt du für diesen
+Eingang in `max_age_pro_eingang` ein längeres Limit oder `null` (unbegrenzt). Dann gilt der
+letzte Wert, bis ein neuer kommt. Ein Ausfall der Quelle fällt so allerdings nicht mehr auf, und
+nach einem Neustart fehlt der Eingang, bis er sich ändert, ausser die Quelle sendet retained.
 
 ## Was publiziert wird
 

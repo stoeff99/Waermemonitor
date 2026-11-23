@@ -21,6 +21,16 @@ calc:
   tick_s: 10            # Integrationsschritt
   publish_s: 30         # Publizierintervall
   max_age_s: 180        # ältere Eingangswerte gelten als ungültig
+  # Ausnahmen pro Eingang (Name wie unter topics, speicher_<i>, boden_/raum_<raum>):
+  # Sekunden oder null = unbegrenzt. Für Quellen, die nur bei Änderung senden
+  # (z.B. ioBroker, Pumpen-0/1). Bei null gilt ein Eingang nur als fehlend,
+  # solange seit dem Start noch kein Wert kam -> Quelle möglichst retained senden.
+  max_age_pro_eingang: {}
+  # Beispiel:
+  # max_age_pro_eingang:
+  #   fbh_pumpe: null
+  #   prim_pumpe: null
+  #   wp_rl: 3600
   state_dir: /var/lib/waermemonitor
   timezone: Europe/Zurich
 
