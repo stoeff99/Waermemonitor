@@ -1,0 +1,104 @@
+# =====================================================================
+#  Wärmemonitor – zentrale Konfiguration
+#  Dienste: waerme_calc.py (Dauerbetrieb), analyse.py (täglich).
+#  Beide lesen diese Datei (Pfad via Umgebungsvariable WAERME_CONFIG,
+#  Standard: /opt/waermemonitor/config.yaml)
+# =====================================================================
+
+mqtt:
+  host: 192.168.20.4
+  port: 1883
+  username: ""          # leer = ohne Login
+  password: ""
+  base_topic: heizung   # alle Topics beginnen mit heizung/...
+
+# ---------------------------------------------------------------------
+#  Berechnung  (waerme_calc.py)
+#  Live-Werte:   heizung/calc/<name>
+#  Tageswerte:   heizung/tag/json  (+ CSV in state_dir)
+# ---------------------------------------------------------------------
+calc:
+  tick_s: 10            # Integrationsschritt
+  publish_s: 30         # Publizierintervall
+  max_age_s: 180        # ältere Eingangswerte gelten als ungültig
+  state_dir: /var/lib/waermemonitor
+  timezone: Europe/Zurich
+
+  # Durchflüsse in l/h (null = unbekannt -> Methode deaktiviert)
+  durchfluss_lh:
+    fbh: 625            # Sekundär (Grundfos 600 / Ventile 651)
+    prim: 1100          # Primär (Grundfos)
+    wp: null            # WP-Ladepumpe: unbekannt -> Methode C aus
+
+  # Fühlerkorrekturen in K (werden zum Messwert addiert)
+  offsets_k:
+    fbh_vl: 0.0
+    fbh_rl: 0.0
+    prim_vl: 0.0
+    prim_rl: 0.0
+    wp_vl: 0.0
+    wp_rl: 0.0
+
+  # MQTT-Topics der Eingänge (null = nicht vorhanden -> Methode rechnet nicht).
+  # Payload: reine Zahl, on/off, JSON-Zahl oder JSON-Objekt mit "value".
+  # Anderes JSON-Feld:  topic#feld  bzw.  topic#pfad.zum.feld
+  #
+  # >>> ANPASSEN: die Topics deines CAN-CT und von Loxone eintragen. <<<
+  # Prüfen:  mosquitto_sub -h 192.168.20.4 -t '#' -v
+  topics:
+    t_aussen:     heizung/can/aussen_temp           # CAN 180.000c AUSSENTEMP
+    # Methode A: FBH sekundär
+    fbh_vl:       heizung/loxone/fbh_vl
+    fbh_rl:       heizung/loxone/fbh_rl
+    fbh_pumpe:    heizung/can/hzk_pumpe             # 0/1 – ohne Pumpensignal keine Integration!
+    fbh_flow_lh:  null                              # Live-Durchfluss l/h (überschreibt Konstante)
+    # Kontrolle: Primärseite Wärmetauscher
+    prim_vl:      heizung/loxone/prim_vl
+    prim_rl:      heizung/loxone/prim_rl
+    prim_pumpe:   heizung/can/hzk_pumpe
+    prim_flow_lh: null
+    # Methode C: WP-Seite
+    wp_vl:        heizung/can/wp_vorlauf            # CAN 180.01d6 WPVORLAUFIST
+    wp_rl:        heizung/can/wp_ruecklauf          # CAN 180.0016 RUECKLAUFISTTEMP
+    wp_pumpe:     heizung/can/wp_pumpenstatus       # CAN 180.fdad WP_PUMPENSTATUS
+    wp_flow_lh:   null
+    wp_ww_aktiv:  null                              # 0/1 WW-Ladung, sobald Relaisbit bekannt
+    # Zählerstände
+    wp_el_kwh:    heizung/loxone/wp_strom_kwh       # Stromzähler WP, Zählerstand kWh
+    stab_el_kwh:  null                              # Elektroeinsatz, Zählerstand kWh
+    # Warmwasser (Trinkwasserseite)
+    ww_liter:     heizung/loxone/ww_liter           # Wasserzähler, Zählerstand Liter
+    ww_t_misch:   heizung/loxone/ww_misch
+    ww_t_kalt:    heizung/loxone/kaltwasser
+
+  # Methode D: Energieinhalt Speicher = Σ Liter × 1.163 Wh/lK × (T − t_ref)
+  # Volumen pro Fühlerzone eintragen (Summe = Gesamtvolumen).
+  speicher:
+    t_ref: 10.0
+    zonen:
+      - {topic: heizung/loxone/boiler_oben,  liter: 87}
+      - {topic: heizung/loxone/boiler_mitte, liter: 87}
+      - {topic: heizung/loxone/boiler_unten, liter: 86}
+      - {topic: heizung/loxone/puffer_oben,  liter: 237}
+      - {topic: heizung/loxone/puffer_mitte, liter: 237}
+      - {topic: heizung/loxone/puffer_unten, liter: 236}
+
+  # Methode B: Flächenmethode  q = k × (T_Boden − T_Raum)
+  flaeche:
+    k_w_m2k: 10.8
+    raeume: []
+    # Beispiel:
+    # raeume:
+    #   - {name: wohnen, m2: 38, t_boden: heizung/loxone/boden_wohnen, t_raum: heizung/loxone/raum_wohnen}
+    #   - {name: kueche, m2: 14, t_boden: heizung/loxone/boden_kueche, t_raum: heizung/loxone/raum_kueche}
+
+# ---------------------------------------------------------------------
+#  Auswertung  (analyse.py, täglich via systemd-Timer)
+#  Ergebnisse: heizung/analyse/<name>  (retained)
+# ---------------------------------------------------------------------
+analyse:
+  tage: 60              # Auswertungsfenster
+  min_abdeckung: 0.9    # Tage mit weniger gültigen Messzeit werden ignoriert
+  heizgrenze_max: 16.0  # nur Tage mit T_aussen darunter für die Signatur
+  t_auslegung: -8.0     # Norm-Aussentemperatur für die Heizlast
+  hgt: 3500             # Heizgradtage HGT 20/12 Standort (MeteoSchweiz / SIA 2028)
