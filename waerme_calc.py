@@ -98,10 +98,25 @@ def extract(payload, key=None):
 class Inputs:
     """Letzte Werte pro Eingang (Spec = 'topic' oder 'topic#json.pfad') mit Zeitstempel."""
 
-    def __init__(self, max_age, max_age_spec=None):
+    """Quellen senden nur bei Änderung: ein Wert gilt, bis ein neuer kommt.
+    Optional (max_age) kann ein Höchstalter erzwungen werden (Watchdog für Quellen,
+    die periodisch senden). None = unbegrenzt."""
+
+    def __init__(self, max_age=None, max_age_spec=None):
         self.max_age = max_age
         self.max_age_spec = dict(max_age_spec or {})  # Spec -> Sekunden oder None (= unbegrenzt)
         self.v = {}
+
+    def dump(self):
+        return {spec: [val, ts] for spec, (val, ts) in self.v.items()}
+
+    def restore(self, data, specs):
+        for spec, x in (data or {}).items():
+            if spec in specs and spec not in self.v:
+                try:
+                    self.v[spec] = (float(x[0]), float(x[1]))
+                except (TypeError, ValueError, IndexError):
+                    pass
 
     def limit(self, spec):
         return self.max_age_spec.get(spec, self.max_age)
@@ -143,11 +158,13 @@ class Calculator:
         self.off = self.c.get("offsets_k", {}) or {}
         self.tz = ZoneInfo(self.c.get("timezone", "Europe/Zurich"))
         self.tick_s = float(self.c.get("tick_s", 10))
-        self.inp = Inputs(float(self.c.get("max_age_s", 180)), self._max_age_spec())
+        max_age = self.c.get("max_age_s")
+        self.inp = Inputs(None if max_age is None else float(max_age), self._max_age_spec())
         st = state or {}
         self.counters = {k: float(st.get("counters", {}).get(k, 0.0)) for k in COUNTERS}
         self.last_counter_in = dict(st.get("last_counter_in", {}))
         self.day = st.get("day")
+        self.inp.restore(st.get("inputs"), set(self.input_specs().values()))
         self.last_tick = None
         self.power = {}
         self.e_speicher = None
@@ -427,7 +444,8 @@ class Calculator:
             day["e_speicher_last"] = e_sp
 
     def state(self):
-        return {"counters": self.counters, "last_counter_in": self.last_counter_in, "day": self.day}
+        return {"counters": self.counters, "last_counter_in": self.last_counter_in, "day": self.day,
+                "inputs": self.inp.dump()}
 
 
 # ---------------------------------------------------------------------
@@ -514,7 +532,7 @@ def main():
             client.publish(f"{base}/status/waerme_calc_fehlend", json.dumps(fehlend), retain=True)
             if fehlend != last_fehlend:
                 if fehlend:
-                    log.warning("Fehlende/veraltete Eingänge: %s", ", ".join(fehlend))
+                    log.warning("Fehlende Eingänge: %s", ", ".join(fehlend))
                 else:
                     log.info("Alle Eingänge aktuell")
                 last_fehlend = fehlend

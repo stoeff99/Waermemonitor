@@ -30,7 +30,7 @@ schreibt sie nach InfluxDB, Grafana zeigt sie an.
 sudo ./install.sh
 sudo nano /opt/waermemonitor/config.yaml        # Topics eintragen (siehe unten)
 sudo systemctl enable --now waerme-calc waerme-analyse.timer
-journalctl -fu waerme-calc                       # meldet fehlende/veraltete Eingänge
+journalctl -fu waerme-calc                       # meldet fehlende Eingänge
 ```
 
 Nach Änderungen an der Config: `sudo systemctl restart waerme-calc`.
@@ -71,12 +71,11 @@ Mehrere Werte aus demselben JSON-Topic sind möglich, z. B. `haus/fbh#vl` und `h
 | `flaeche.raeume[]` | Boden- und Raumtemperatur pro Raum | Methode B |
 
 Ein Eingang, der fehlt oder auf `null` steht, schadet nicht. Die zugehörige Methode rechnet dann
-einfach nicht. Ein Wert gilt als **veraltet**, wenn er länger als `max_age_s` (180 s) nicht
-aktualisiert wurde. Die Quellen sollten also mindestens jede Minute senden, nicht nur bei Änderung.
-Sendet eine Quelle nur bei Änderung (z.B. ioBroker, Pumpensignale 0/1), setzt du für diesen
-Eingang in `max_age_pro_eingang` ein längeres Limit oder `null` (unbegrenzt). Dann gilt der
-letzte Wert, bis ein neuer kommt. Ein Ausfall der Quelle fällt so allerdings nicht mehr auf, und
-nach einem Neustart fehlt der Eingang, bis er sich ändert, ausser die Quelle sendet retained.
+einfach nicht. Die Quellen dürfen **nur bei Änderung** senden: ein Wert gilt, bis ein neuer kommt. Als
+fehlend zählt ein Eingang nur, wenn noch nie ein Wert empfangen wurde. Die letzten Werte
+werden in `state.json` gespeichert, ein Neustart verliert sie also nicht. `heizung/diag/alter_<eingang>`
+zeigt trotzdem, wie alt der letzte Wert ist. Für Quellen, die periodisch senden, kannst du mit
+`max_age_s` bzw. `max_age_pro_eingang` ein Höchstalter als Watchdog setzen.
 
 ## Was publiziert wird
 
@@ -90,7 +89,7 @@ nach einem Neustart fehlt der Eingang, bis er sich ändert, ausser die Quelle se
 | `heizung/calc/e_*_kwh` | fortlaufende Zählerstände, retained |
 | `heizung/diag/methode_<m>` | 1 = Methode rechnet gerade, 0 = Eingänge fehlen |
 | `heizung/diag/alter_<eingang>` | Alter des letzten Werts in s (−1 = noch nie empfangen) |
-| `heizung/diag/fehlende_eingaenge` | Anzahl fehlender oder veralteter Eingänge |
+| `heizung/diag/fehlende_eingaenge` | Anzahl fehlender Eingänge (nie empfangen bzw. Watchdog abgelaufen) |
 | `heizung/status/waerme_calc_fehlend` | JSON-Liste der fehlenden Eingänge, retained |
 | `heizung/tag/json` | Tageswerte, ein JSON pro Tag kurz nach Mitternacht |
 | `heizung/analyse/*` | Signatur, Heizlast, Sigma pro Methode, 7-Tage-Mittel |
