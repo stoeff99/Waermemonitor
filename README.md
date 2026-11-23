@@ -67,7 +67,7 @@ Mehrere Werte aus demselben JSON-Topic sind möglich, z. B. `haus/fbh#vl` und `h
 | `wp_ww_aktiv` | 0/1 Warmwasser-Ladung (Relaisbit, sobald bekannt) | Aufteilung WP Heizen/WW |
 | `wp_el_kwh`, `stab_el_kwh` | Stromzähler WP / Elektroeinsatz, **Zählerstand** kWh | Arbeitszahl |
 | `ww_liter`, `ww_t_misch`, `ww_t_kalt` | Wasserzähler **Zählerstand** Liter, Mischwasser, Kaltwasser | Warmwasser-Energie |
-| `speicher.zonen[]` | Speicherfühler mit Volumen pro Zone | Methode D |
+| `speicher.zonen[]` | Speicherfühler mit Volumen pro Zone, optional `offset_k` | Methode D |
 | `flaeche.raeume[]` | Boden- und Raumtemperatur pro Raum | Methode B |
 
 Ein Eingang, der fehlt oder auf `null` steht, schadet nicht. Die zugehörige Methode rechnet dann
@@ -113,7 +113,8 @@ Historie für die Analyse steht in `tageswerte.csv`.
 3. **Relaisbits zuordnen.** Leg die Relaisbits ein paar Tage in Grafana neben den WP-Vorlauf und die
    Warmwassertemperatur. Das Bit für die Warmwasser-Ladung trägst du als `wp_ww_aktiv` ein.
 4. **Speichervolumen verteilen.** Die Platzhalter sind 260 l Boiler und 710 l Puffer. Verteile das
-   Volumen nach den tatsächlichen Fühlerhöhen.
+   Volumen nach den tatsächlichen Fühlerhöhen. Fehlt für eine Zone ein Fühler, nimmst du einen
+   anderen mit `offset_k` als Ersatz, z. B. `boiler_unten` mit `offset_k: -2.0` für den Pufferboden.
 5. **Durchfluss FBH.** 625 l/h ist der Mittelwert aus Pumpe und Ventilen. Nach einer Referenzmessung
    trägst du dort den gemessenen Wert ein.
 6. **Uhr des WP-Reglers stellen.** Sie stand beim Scan auf dem 01.01.2011.

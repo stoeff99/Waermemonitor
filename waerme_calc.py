@@ -234,6 +234,7 @@ class Calculator:
             t = self.inp.get(z["topic"], now)
             if t is None:
                 return None
+            t += float(z.get("offset_k", 0.0) or 0.0)
             e += float(z["liter"]) * CP * (t - tref)
         return e
 

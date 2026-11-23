@@ -71,17 +71,18 @@ calc:
     ww_t_misch:   heizung/loxone/ww_misch
     ww_t_kalt:    heizung/loxone/kaltwasser
 
-  # Methode D: Energieinhalt Speicher = Σ Liter × 1.163 Wh/lK × (T − t_ref)
+  # Methode D: Energieinhalt Speicher = Σ Liter × 1.163 Wh/lK × (T + offset_k − t_ref)
   # Volumen pro Fühlerzone eintragen (Summe = Gesamtvolumen).
+  # offset_k (optional): Korrektur in K, z.B. wenn ein Fühler als Ersatz für eine
+  # Zone ohne eigenen Fühler dient. Derselbe Topic darf mehrfach vorkommen.
   speicher:
     t_ref: 10.0
     zonen:
-      - {topic: heizung/loxone/boiler_oben,  liter: 87}
-      - {topic: heizung/loxone/boiler_mitte, liter: 87}
-      - {topic: heizung/loxone/boiler_unten, liter: 86}
+      - {topic: heizung/loxone/boiler_oben,  liter: 130}
+      - {topic: heizung/loxone/boiler_unten, liter: 130}
       - {topic: heizung/loxone/puffer_oben,  liter: 237}
       - {topic: heizung/loxone/puffer_mitte, liter: 237}
-      - {topic: heizung/loxone/puffer_unten, liter: 236}
+      - {topic: heizung/loxone/boiler_unten, liter: 236, offset_k: -2.0}   # Ersatz für puffer_unten
 
   # Methode B: Flächenmethode  q = k × (T_Boden − T_Raum)
   flaeche:
