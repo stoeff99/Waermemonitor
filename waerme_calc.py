@@ -263,13 +263,14 @@ class Calculator:
     # ---------- Methoden ----------
     def _kreis(self, name, now):
         """Leistung eines Wasserkreises in kW (Kühlen negativ). None = nicht berechenbar."""
-        vl, rl = self._temp(f"{name}_vl", now), self._temp(f"{name}_rl", now)
-        if vl is None or rl is None:
-            return None
+        # Methode überhaupt konfiguriert? (Fühler-Topics und Durchfluss vorhanden)
         flow_topic = self.t.get(f"{name}_flow_lh")
-        flow = self.inp.get(flow_topic, now) if flow_topic else self.flow.get(name)
-        if flow is None:
+        if not (self.t.get(f"{name}_vl") and self.t.get(f"{name}_rl")):
             return None
+        if not flow_topic and self.flow.get(name) is None:
+            return None
+        # Pumpe zuerst: steht sie, ist die Leistung 0 – egal ob Temperaturen oder
+        # Durchfluss gerade fehlen/veraltet sind (die Pause zählt als gültige Zeit).
         pumpe_topic = self.t.get(f"{name}_pumpe")
         if not pumpe_topic:
             return None  # ohne Pumpensignal würde stehendes Wasser Energie vortäuschen
@@ -278,6 +279,12 @@ class Calculator:
             return None
         if pumpe < 0.5:
             return 0.0
+        vl, rl = self._temp(f"{name}_vl", now), self._temp(f"{name}_rl", now)
+        if vl is None or rl is None:
+            return None
+        flow = self.inp.get(flow_topic, now) if flow_topic else self.flow.get(name)
+        if flow is None:
+            return None
         return flow * (vl - rl) * CP
 
     def _flaeche(self, now):
