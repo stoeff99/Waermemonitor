@@ -87,6 +87,7 @@ zeigt trotzdem, wie alt der letzte Wert ist. Für Quellen, die periodisch senden
 | `heizung/calc/p_wp_kw` | Leistung WP-Seite (C) |
 | `heizung/calc/e_speicher_kwh` | Energieinhalt des Speichers über `t_ref` |
 | `heizung/calc/e_*_kwh` | fortlaufende Zählerstände, retained |
+| `heizung/heute/<feld>` | laufender Tag bis jetzt, gleiche Felder wie die Tageswerte (z.B. `az_system`, `nutzwaerme_kwh`, `e_el_wp_kwh`) |
 | `heizung/diag/methode_<m>` | 1 = Methode rechnet gerade, 0 = Eingänge fehlen |
 | `heizung/diag/alter_<eingang>` | Alter des letzten Werts in s (−1 = noch nie empfangen) |
 | `heizung/diag/fehlende_eingaenge` | Anzahl fehlender Eingänge (nie empfangen bzw. Watchdog abgelaufen) |

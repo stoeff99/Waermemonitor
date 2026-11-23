@@ -7,6 +7,7 @@ Live:    <base>/calc/p_fbh_kw, p_prim_kw, p_flaeche_kw, p_wp_kw      (kW, Kühle
          <base>/calc/e_<zaehler>_kwh                                (Zählerstände, retained)
          <base>/diag/methode_<m>, alter_<eingang>, fehlende_eingaenge   (Diagnose)
          <base>/status/waerme_calc_fehlend                          (JSON-Liste, retained)
+Laufend: <base>/heute/<feld>   (Tageswerte des laufenden Tags bis jetzt, z.B. az_system)
 Täglich: <base>/tag/json   (ein JSON pro Tag, Zeitstempel = lokale Mitternacht)
          <state_dir>/tageswerte.csv
 
@@ -533,6 +534,11 @@ def main():
                 client.publish(f"{base}/calc/e_speicher_kwh", f"{calc.e_speicher:.3f}")
             for k, v in calc.counters.items():
                 client.publish(f"{base}/calc/{k}_kwh", f"{v:.3f}", retain=True)
+            # Laufender Tag bis jetzt (gleiche Felder wie die Tageswerte, inkl. Arbeitszahl)
+            if calc.day is not None:
+                for k, v in calc.close_day().items():
+                    if k not in ("datum", "ts") and v is not None:
+                        client.publish(f"{base}/heute/{k}", str(v))
             diag, fehlend = calc.diagnose(now)
             for k, v in diag.items():
                 client.publish(f"{base}/diag/{k}", str(v))
