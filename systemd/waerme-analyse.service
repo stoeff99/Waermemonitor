@@ -1,0 +1,10 @@
+[Unit]
+Description=Wärmemonitor Tagesauswertung
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=waerme
+Environment=WAERME_CONFIG=/opt/waermemonitor/config.yaml
+WorkingDirectory=/opt/waermemonitor
+ExecStart=/opt/waermemonitor/venv/bin/python /opt/waermemonitor/analyse.py

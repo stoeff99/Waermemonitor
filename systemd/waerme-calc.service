@@ -1,0 +1,16 @@
+[Unit]
+Description=Wärmemonitor waerme_calc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=waerme
+Environment=WAERME_CONFIG=/opt/waermemonitor/config.yaml
+WorkingDirectory=/opt/waermemonitor
+ExecStart=/opt/waermemonitor/venv/bin/python /opt/waermemonitor/waerme_calc.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
