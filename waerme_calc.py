@@ -7,6 +7,7 @@ Live:    <base>/calc/p_fbh_kw, p_prim_kw, p_flaeche_kw, p_wp_kw      (kW, Kühle
          <base>/calc/e_<zaehler>_kwh                                (Zählerstände, retained)
          <base>/diag/methode_<m>, alter_<eingang>, fehlende_eingaenge   (Diagnose)
          <base>/status/waerme_calc_fehlend                          (JSON-Liste, retained)
+Laufend: <base>/heute/<feld>   (Tageswerte des laufenden Tags bis jetzt, z.B. az_system)
 Täglich: <base>/tag/json   (ein JSON pro Tag, Zeitstempel = lokale Mitternacht)
          <state_dir>/tageswerte.csv
 
@@ -98,9 +99,36 @@ def extract(payload, key=None):
 class Inputs:
     """Letzte Werte pro Eingang (Spec = 'topic' oder 'topic#json.pfad') mit Zeitstempel."""
 
-    def __init__(self, max_age):
+    """Quellen senden nur bei Änderung: ein Wert gilt, bis ein neuer kommt.
+    Optional (max_age) kann ein Höchstalter erzwungen werden (Watchdog für Quellen,
+    die periodisch senden). None = unbegrenzt."""
+
+    def __init__(self, max_age=None, max_age_spec=None):
         self.max_age = max_age
+        self.max_age_spec = dict(max_age_spec or {})  # Spec -> Sekunden oder None (= unbegrenzt)
         self.v = {}
+
+    def dump(self):
+        return {spec: [val, ts] for spec, (val, ts) in self.v.items()}
+
+    def restore(self, data, specs):
+        for spec, x in (data or {}).items():
+            if spec in specs and spec not in self.v:
+                try:
+                    self.v[spec] = (float(x[0]), float(x[1]))
+                except (TypeError, ValueError, IndexError):
+                    pass
+
+    def limit(self, spec):
+        return self.max_age_spec.get(spec, self.max_age)
+
+    def stale(self, spec, now):
+        """True, wenn nie empfangen oder älter als das Limit dieses Eingangs."""
+        x = self.v.get(spec)
+        if x is None:
+            return True
+        lim = self.limit(spec)
+        return lim is not None and now - x[1] > lim
 
     def set(self, spec, val, now):
         self.v[spec] = (val, now)
@@ -118,10 +146,9 @@ class Inputs:
     def get(self, spec, now):
         if not spec:
             return None
-        x = self.v.get(spec)
-        if x is None or now - x[1] > self.max_age:
+        if self.stale(spec, now):
             return None
-        return x[0]
+        return self.v[spec][0]
 
 
 class Calculator:
@@ -132,11 +159,13 @@ class Calculator:
         self.off = self.c.get("offsets_k", {}) or {}
         self.tz = ZoneInfo(self.c.get("timezone", "Europe/Zurich"))
         self.tick_s = float(self.c.get("tick_s", 10))
-        self.inp = Inputs(float(self.c.get("max_age_s", 180)))
+        max_age = self.c.get("max_age_s")
+        self.inp = Inputs(None if max_age is None else float(max_age), self._max_age_spec())
         st = state or {}
         self.counters = {k: float(st.get("counters", {}).get(k, 0.0)) for k in COUNTERS}
         self.last_counter_in = dict(st.get("last_counter_in", {}))
         self.day = st.get("day")
+        self.inp.restore(st.get("inputs"), set(self.input_specs().values()))
         self.last_tick = None
         self.power = {}
         self.e_speicher = None
@@ -152,6 +181,27 @@ class Calculator:
             specs[f"boden_{r['name']}"] = r["t_boden"]
             specs[f"raum_{r['name']}"] = r["t_raum"]
         return specs
+
+    def _max_age_spec(self):
+        """max_age_pro_eingang {Name: Sekunden | null} auf Specs abbilden.
+
+        null = unbegrenzt (Quelle sendet nur bei Änderung). Teilen sich mehrere Namen
+        einen Spec, gilt das grosszügigste Limit.
+        """
+        over = self.c.get("max_age_pro_eingang") or {}
+        specs = self.input_specs()
+        out = {}
+        for name, lim in over.items():
+            spec = specs.get(name)
+            if spec is None:
+                log.warning("max_age_pro_eingang: unbekannter Eingang '%s' wird ignoriert", name)
+                continue
+            lim = None if lim is None else float(lim)
+            if spec in out:
+                old = out[spec]
+                lim = None if old is None or lim is None else max(old, lim)
+            out[spec] = lim
+        return out
 
     def _zonen(self):
         """Speicherzonen mit gültigem Topic und Volumen (Zonen mit topic: null werden ignoriert)."""
@@ -199,7 +249,7 @@ class Calculator:
         for name, spec in self.input_specs().items():
             age = self.inp.age(spec, now)
             diag[f"alter_{name}"] = -1 if age is None else round(age)
-            if age is None or age > self.inp.max_age:
+            if self.inp.stale(spec, now):
                 fehlend.append(f"{name} ({spec})")
         for m in ("fbh", "prim", "flaeche", "wp"):
             diag[f"methode_{m}"] = 0 if self.power.get(m) is None else 1
@@ -214,13 +264,14 @@ class Calculator:
     # ---------- Methoden ----------
     def _kreis(self, name, now):
         """Leistung eines Wasserkreises in kW (Kühlen negativ). None = nicht berechenbar."""
-        vl, rl = self._temp(f"{name}_vl", now), self._temp(f"{name}_rl", now)
-        if vl is None or rl is None:
-            return None
+        # Methode überhaupt konfiguriert? (Fühler-Topics und Durchfluss vorhanden)
         flow_topic = self.t.get(f"{name}_flow_lh")
-        flow = self.inp.get(flow_topic, now) if flow_topic else self.flow.get(name)
-        if flow is None:
+        if not (self.t.get(f"{name}_vl") and self.t.get(f"{name}_rl")):
             return None
+        if not flow_topic and self.flow.get(name) is None:
+            return None
+        # Pumpe zuerst: steht sie, ist die Leistung 0 – egal ob Temperaturen oder
+        # Durchfluss gerade fehlen/veraltet sind (die Pause zählt als gültige Zeit).
         pumpe_topic = self.t.get(f"{name}_pumpe")
         if not pumpe_topic:
             return None  # ohne Pumpensignal würde stehendes Wasser Energie vortäuschen
@@ -229,6 +280,12 @@ class Calculator:
             return None
         if pumpe < 0.5:
             return 0.0
+        vl, rl = self._temp(f"{name}_vl", now), self._temp(f"{name}_rl", now)
+        if vl is None or rl is None:
+            return None
+        flow = self.inp.get(flow_topic, now) if flow_topic else self.flow.get(name)
+        if flow is None:
+            return None
         return flow * (vl - rl) * CP
 
     def _flaeche(self, now):
@@ -395,7 +452,8 @@ class Calculator:
             day["e_speicher_last"] = e_sp
 
     def state(self):
-        return {"counters": self.counters, "last_counter_in": self.last_counter_in, "day": self.day}
+        return {"counters": self.counters, "last_counter_in": self.last_counter_in, "day": self.day,
+                "inputs": self.inp.dump()}
 
 
 # ---------------------------------------------------------------------
@@ -476,13 +534,18 @@ def main():
                 client.publish(f"{base}/calc/e_speicher_kwh", f"{calc.e_speicher:.3f}")
             for k, v in calc.counters.items():
                 client.publish(f"{base}/calc/{k}_kwh", f"{v:.3f}", retain=True)
+            # Laufender Tag bis jetzt (gleiche Felder wie die Tageswerte, inkl. Arbeitszahl)
+            if calc.day is not None:
+                for k, v in calc.close_day().items():
+                    if k not in ("datum", "ts") and v is not None:
+                        client.publish(f"{base}/heute/{k}", str(v))
             diag, fehlend = calc.diagnose(now)
             for k, v in diag.items():
                 client.publish(f"{base}/diag/{k}", str(v))
             client.publish(f"{base}/status/waerme_calc_fehlend", json.dumps(fehlend), retain=True)
             if fehlend != last_fehlend:
                 if fehlend:
-                    log.warning("Fehlende/veraltete Eingänge: %s", ", ".join(fehlend))
+                    log.warning("Fehlende Eingänge: %s", ", ".join(fehlend))
                 else:
                     log.info("Alle Eingänge aktuell")
                 last_fehlend = fehlend

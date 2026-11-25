@@ -20,7 +20,14 @@ mqtt:
 calc:
   tick_s: 10            # Integrationsschritt
   publish_s: 30         # Publizierintervall
-  max_age_s: 180        # ältere Eingangswerte gelten als ungültig
+  # Eingangswerte gelten, bis ein neuer Wert kommt (Quellen senden nur bei Änderung).
+  # Die letzten Werte werden im state_dir gespeichert und überstehen einen Neustart.
+  # Optionaler Watchdog für Quellen, die periodisch senden: Höchstalter in s
+  # (null = unbegrenzt), global und/oder pro Eingang (Name wie unter topics,
+  # speicher_<i>, boden_/raum_<raum>).
+  max_age_s: null
+  max_age_pro_eingang: {}
+  # Beispiel:  max_age_pro_eingang: {wp_el_kwh: 900}
   state_dir: /var/lib/waermemonitor
   timezone: Europe/Zurich
 
