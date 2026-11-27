@@ -38,6 +38,9 @@ calc:
   # Ein Sprung des WP-Stromzählers um mehr als so viele kWh auf einmal markiert den
   # Tag als lückenhaft (luecke_strom_kwh). analyse.py lässt solche Tage weg.
   luecke_strom_kwh: 1.0
+  # Umrechnungsfaktor pro Eingang (Wert × Faktor), z.B. wp_el_w in kW -> W:
+  #   faktoren: {wp_el_w: 1000}
+  faktoren: {}
   # Beispiel:  max_age_pro_eingang: {wp_el_kwh: 900}
   state_dir: /var/lib/waermemonitor
   timezone: Europe/Zurich
@@ -91,7 +94,9 @@ calc:
     ww_t_misch:   heizung/loxone/ww_misch
     ww_t_kalt:    heizung/loxone/kaltwasser
 
-  # Stromaufteilung aus der Momentanleistung wp_el_w (nur aktiv, wenn wp_el_w gesetzt):
+  # Stromaufteilung aus der Momentanleistung wp_el_w (nur aktiv, wenn wp_el_w gesetzt).
+  # Alle Schwellen in WATT. Liefert die Quelle kW, nicht die Schwellen ändern, sondern
+  # faktoren: {wp_el_w: 1000} setzen (die Energie wird aus Watt gerechnet).
   # Begleitheizung / Verdichter Heizen / Verdichter WW / Rest (Standby, Pumpen-Vorlauf).
   # Phase beginnt bei P >= p_start_min_w, wird nach klassifikation_s eingeordnet:
   # P < p_30s_max_w -> Begleitheizung, sonst Verdichter. Steigt P in einer

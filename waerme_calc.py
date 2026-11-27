@@ -20,6 +20,7 @@ import csv
 import json
 import logging
 import os
+import re
 import signal
 import threading
 import time
@@ -81,7 +82,15 @@ def _scalar(v):
                 return 1.0
             if low in ("off", "false", "aus"):
                 return 0.0
+            # Zahl mit Einheit, z.B. "2834 W" oder "21,5 °C" (Einheit wird ignoriert,
+            # Umrechnung über calc.faktoren)
+            m = _ZAHL_MIT_EINHEIT.match(s)
+            if m:
+                return float(m.group(1).replace(",", "."))
     return None
+
+
+_ZAHL_MIT_EINHEIT = re.compile(r"^([-+]?\d+(?:[.,]\d+)?)\s*[^\d\s.,+-][^\d]*$")
 
 
 def extract(payload, key=None):
@@ -281,11 +290,24 @@ class Calculator:
     def input_topics(self):
         return sorted({split_spec(s)[0] for s in self.input_specs().values()})
 
+    def _faktoren(self):
+        """calc.faktoren {Name: Faktor} als {Spec: Faktor}, z.B. {wp_el_w: 1000} für kW -> W."""
+        if not hasattr(self, "_faktoren_cache"):
+            specs = self.input_specs()
+            self._faktoren_cache = {}
+            for name, f in (self.c.get("faktoren") or {}).items():
+                if specs.get(name) and f is not None:
+                    self._faktoren_cache[specs[name]] = float(f)
+                else:
+                    log.warning("faktoren: unbekannter Eingang '%s' wird ignoriert", name)
+        return self._faktoren_cache
+
     def handle_message(self, topic, payload, now):
         with self.lock:
             for spec in self._routes.get(topic, ()):
                 val = extract(payload, split_spec(spec)[1])
                 if val is not None:
+                    val *= self._faktoren().get(spec, 1.0)
                     self.inp.set(spec, val, now)
                     if spec == self.t.get("wp_el_w"):
                         self._el_event(val, now)
