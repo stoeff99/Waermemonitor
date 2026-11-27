@@ -34,11 +34,17 @@ def lade(path, tage):
     return rows[-tage:]
 
 
+def tag_ok(r, a, key="min_abdeckung"):
+    """Tag ohne Stromlücke und mit genügend Abdeckung der FBH-Messung."""
+    cov = num(r, "abdeckung_fbh")
+    return cov is not None and cov >= a[key] and not (num(r, "luecke_strom_kwh") or 0.0) > 0
+
+
 def signatur(rows, a):
     pts = []
     for r in rows:
         ta, e, cov = num(r, "t_aussen_mittel"), num(r, "e_fbh_heizen_kwh"), num(r, "abdeckung_fbh")
-        if None in (ta, e, cov) or cov < a["min_abdeckung"]:
+        if None in (ta, e, cov) or not tag_ok(r, a):
             continue
         if e > 0.5 and ta < a["heizgrenze_max"]:
             pts.append((ta, e))
@@ -69,6 +75,8 @@ def three_cornered_hat(rows, a):
             "C": ("e_prim_heizen_kwh", "abdeckung_prim")}
     data = []
     for r in rows:
+        if (num(r, "luecke_strom_kwh") or 0.0) > 0:
+            continue
         vals = []
         for k, cov in keys.values():
             v, c = num(r, k), num(r, cov)
@@ -93,11 +101,40 @@ def three_cornered_hat(rows, a):
     return res
 
 
-def kennzahlen(rows):
-    """Mittelwerte der letzten Tage (nur gültige)."""
+def kennzahlen(rows, a):
+    """Kennzahlen der letzten 7 Tage, nur gültige Tage (Abdeckung, keine Stromlücke).
+
+    Arbeitszahlen energiegewichtet: Summe Wärme / Summe Strom, nicht Mittel der Tageswerte.
+    """
     res = {}
-    for k in ("az_system", "az_wp", "verlust_kwh", "e_ww_kwh"):
-        vals = [num(r, k) for r in rows[-7:]]
+    tage = [r for r in rows[-7:] if tag_ok(r, a, "min_abdeckung_kennzahlen")]
+    res["kennzahlen_n_tage"] = len(tage)
+
+    def summe(r, *keys):
+        vals = [num(r, k) for k in keys]
+        return None if None in vals else sum(vals)
+
+    for name, waerme, strom in (
+        ("az_system", ("nutzwaerme_kwh",), ("e_el_wp_kwh", "e_el_stab_kwh")),
+        ("az_wp", ("e_wp_kwh",), ("e_el_wp_kwh",)),
+    ):
+        w = s = 0.0
+        for r in tage:
+            ww, ss = summe(r, *waerme), summe(r, *strom)
+            if ww is not None and ss is not None and ss > 0.5:
+                w, s = w + ww, s + ss
+        if s > 0.5 and w > 0.5:
+            res[f"{name}_7d"] = round(w / s, 3)
+    # Netto ohne Begleitheizung
+    w = s = 0.0
+    for r in tage:
+        nutz, el, bh = num(r, "nutzwaerme_kwh"), summe(r, "e_el_wp_kwh", "e_el_stab_kwh"), num(r, "e_el_bh_kwh")
+        if None not in (nutz, el, bh) and el - bh > 0.5:
+            w, s = w + nutz, s + el - bh
+    if s > 0.5:
+        res["az_wp_netto_7d"] = round(w / s, 3)
+    for k in ("verlust_kwh", "e_ww_kwh", "e_ww_schaetz_kwh", "e_el_bh_kwh", "starts"):
+        vals = [num(r, k) for r in tage]
         vals = [v for v in vals if v is not None]
         if vals:
             res[f"{k}_7d"] = round(sum(vals) / len(vals), 3)
@@ -114,7 +151,7 @@ def main():
 
     setup_logging()
     cfg = load_config()
-    a = {"tage": 60, "min_abdeckung": 0.9, "heizgrenze_max": 16.0, "t_auslegung": -8.0, "hgt": 3500}
+    a = {"tage": 60, "min_abdeckung": 0.9, "min_abdeckung_kennzahlen": 0.95, "heizgrenze_max": 16.0, "t_auslegung": -8.0, "hgt": 3500}
     a.update(cfg.get("analyse") or {})
     path = args.csv or os.path.join(cfg["calc"].get("state_dir", "/var/lib/waermemonitor"),
                                     "tageswerte.csv")
@@ -122,7 +159,7 @@ def main():
     res = {}
     res.update(signatur(rows, a))
     res.update(three_cornered_hat(rows, a))
-    res.update(kennzahlen(rows))
+    res.update(kennzahlen(rows, a))
 
     for k, v in res.items():
         print(f"{k:28s} {v}")

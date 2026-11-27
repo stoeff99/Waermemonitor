@@ -27,6 +27,17 @@ calc:
   # speicher_<i>, boden_/raum_<raum>).
   max_age_s: null
   max_age_pro_eingang: {}
+  # Eingefroren: läuft die Pumpe, ändern sich VL oder RL aber seit so vielen Sekunden
+  # nicht mehr, gilt der Kreis als ungültig (Quelle hängt, sendet evtl. denselben
+  # Haltewert immer wieder). Gilt sinngemäss auch für wp_el_w. null = aus.
+  eingefroren_s: 900
+  # Anlaufzeit pro Kreis: so lange nach dem Pumpenstart nicht integrieren, bis die
+  # Fühler stationär messen (z.B. träge Primärfühler).
+  anlauf_s: {}
+  # Beispiel:  anlauf_s: {prim: 300}
+  # Ein Sprung des WP-Stromzählers um mehr als so viele kWh auf einmal markiert den
+  # Tag als lückenhaft (luecke_strom_kwh). analyse.py lässt solche Tage weg.
+  luecke_strom_kwh: 1.0
   # Beispiel:  max_age_pro_eingang: {wp_el_kwh: 900}
   state_dir: /var/lib/waermemonitor
   timezone: Europe/Zurich
@@ -72,11 +83,45 @@ calc:
     wp_ww_aktiv:  null                              # 0/1 WW-Ladung, sobald Relaisbit bekannt
     # Zählerstände
     wp_el_kwh:    heizung/loxone/wp_strom_kwh       # Stromzähler WP, Zählerstand kWh
+    wp_el_w:      null                              # Momentanleistung W (gleicher Zähler) -> Stromaufteilung
+    t_quelle:     null                              # Soletemperatur (CAN 01d4 QUELLE_IST) -> kennlinie_wp
     stab_el_kwh:  null                              # Elektroeinsatz, Zählerstand kWh
     # Warmwasser (Trinkwasserseite)
     ww_liter:     heizung/loxone/ww_liter           # Wasserzähler, Zählerstand Liter
     ww_t_misch:   heizung/loxone/ww_misch
     ww_t_kalt:    heizung/loxone/kaltwasser
+
+  # Stromaufteilung aus der Momentanleistung wp_el_w (nur aktiv, wenn wp_el_w gesetzt):
+  # Begleitheizung / Verdichter Heizen / Verdichter WW / Rest (Standby, Pumpen-Vorlauf).
+  # Phase beginnt bei P >= p_start_min_w, wird nach klassifikation_s eingeordnet:
+  # P < p_30s_max_w -> Begleitheizung, sonst Verdichter. Steigt P in einer
+  # Begleitheizungsphase auf p_verdichter_w, ist es ein Verdichterstart.
+  # Verdichter läuft, solange P >= p_lauf_min_w; WW-Ladung, wenn WP-Vorlauf > ww_wp_vl_min_c.
+  stromaufteilung:
+    p_start_min_w: 150
+    klassifikation_s: 30
+    p_30s_max_w: 900
+    p_verdichter_w: 1500
+    p_lauf_min_w: 1000
+    vorlauf_max_s: 120         # "Begleitheizung", die so schnell in einen Verdichterstart übergeht = Pumpen-Vorlauf
+    ww_wp_vl_min_c: 40.0
+    zuschlag_bh_kwh_tag: 0.0   # Begleitheizung während Verdichterläufen (nicht erkennbar), z.B. 0.4
+    cop_ww_schaetzung: 3.2     # WW-Wärme = WW-Strom × COP, solange kein WW-Zähler liefert
+
+  # Methode E «WP-Kennlinie»: Heizwärme = Laufzeit Heizen × p_th(T_quelle)
+  # p_th = p_th_kw + dp_th_pro_k × T_quelle (ohne t_quelle: konstant p_th_kw). null = aus.
+  kennlinie_wp:
+    p_th_kw: null              # Annahme für die WPF 10: etwa 11 kW bei Sole 0 °C
+    dp_th_pro_k: 0.3
+
+  # FBH-Durchfluss und Stellantriebe (Loxone, 0–100 %). Ohne Stellantriebe gilt
+  # durchfluss_lh.fbh. Stellantriebe senden selten und gelten ohne Höchstalter.
+  fbh_flow:
+    stellantriebe: []
+    # stellantriebe: [heizung/loxone/sa_wohnen, heizung/loxone/sa_kueche, heizung/loxone/sa_eltern,
+    #                 heizung/loxone/sa_gang_og, heizung/loxone/sa_buero]
+    kennlinie: []              # [[mittlere Öffnung %, l/h], ...] nach Clamp-on-Messung, z.B. [[30, 250], [100, 625]]
+    min_oeffnung_pct: 30       # darunter: FBH-Wärme als e_fbh_unsicher, nicht in Bilanz/Abdeckung
 
   # Methode D: Energieinhalt Speicher = Σ Liter × 1.163 Wh/lK × (T + offset_k − t_ref)
   # Volumen pro Fühlerzone eintragen (Summe = Gesamtvolumen).
@@ -107,6 +152,7 @@ calc:
 analyse:
   tage: 60              # Auswertungsfenster
   min_abdeckung: 0.9    # Tage mit weniger gültigen Messzeit werden ignoriert
+  min_abdeckung_kennzahlen: 0.95   # strenger für die 7-Tage-Arbeitszahlen
   heizgrenze_max: 16.0  # nur Tage mit T_aussen darunter für die Signatur
   t_auslegung: -8.0     # Norm-Aussentemperatur für die Heizlast
   hgt: 3500             # Heizgradtage HGT 20/12 Standort (MeteoSchweiz / SIA 2028)
