@@ -37,7 +37,10 @@ Nach Änderungen an der Config: `sudo systemctl restart waerme-calc`.
 
 Telegraf: `telegraf/heizung.conf` nach `/etc/telegraf/telegraf.d/` kopieren. Im Output trägst du
 `INFLUX_HOST`, `token`, `organization` und `bucket` ein, für InfluxDB 1.x nimmst du den
-auskommentierten Block. Prüfen mit `telegraf --test --config-directory /etc/telegraf/telegraf.d`.
+auskommentierten Block. Prüfen mit
+`telegraf --config /etc/telegraf/telegraf.conf --config-directory /etc/telegraf/telegraf.d --test --test-wait 60`.
+Andere Outputs in der Haupt-`telegraf.conf` bekommen die `heizung_*`-Werte sonst auch. Dort
+`namedrop = ["heizung_*"]` ergänzen, damit sie nur im Wärmemonitor-Bucket landen.
 
 ## Eingänge zuordnen (`calc.topics`)
 
@@ -77,6 +80,38 @@ werden in `state.json` gespeichert, ein Neustart verliert sie also nicht. `heizu
 zeigt trotzdem, wie alt der letzte Wert ist. Für Quellen, die periodisch senden, kannst du mit
 `max_age_s` bzw. `max_age_pro_eingang` ein Höchstalter als Watchdog setzen.
 
+**Eingefrorene Werte** erkennt der Dienst trotzdem: Läuft eine Pumpe, ändern sich Vor- oder
+Rücklauf aber seit `eingefroren_s` (900 s) nicht mehr, gilt der Kreis als ungültig. Das greift
+auch, wenn eine Quelle denselben Haltewert immer wieder sendet. Dasselbe gilt für die
+Momentanleistung `wp_el_w`, wenn sie über der Standby-Schwelle stehen bleibt.
+
+## Stromaufteilung, Begleitheizung, Warmwasser
+
+Mit `topics.wp_el_w` (Momentanleistung in W, derselbe Zähler wie `wp_el_kwh`) teilt der Dienst den
+Strom auf. Jede Phase über `p_start_min_w` (150 W) wird nach 30 s eingeordnet:
+
+| Klasse | Erkennung | Zähler |
+|---|---|---|
+| Begleitheizung | nach 30 s unter 900 W | `e_el_bh` |
+| Verdichter Heizen | P ≥ 1000 W, WP-Vorlauf ≤ 40 °C | `e_el_heiz`, `laufzeit_heiz_h` |
+| Verdichter WW | P ≥ 1000 W, WP-Vorlauf > 40 °C | `e_el_ww`, `laufzeit_ww_h` |
+| Rest | Standby, Pumpen-Vor-/Nachlauf | `e_el_rest_kwh` = Zählerstand minus Klassen |
+
+Steigt P in einer Begleitheizungsphase auf 1500 W, ist es ein Verdichterstart (`starts`). Geschieht
+das innerhalb von 2 min, war es der Pumpen-Vorlauf und zählt nicht als Begleitheizung. Während
+eines Verdichterlaufs ist die Begleitheizung nicht erkennbar, dafür gibt es `zuschlag_bh_kwh_tag`.
+
+Solange kein Warmwasserzähler liefert, schätzt der Dienst die WW-Wärme als WW-Strom ×
+`cop_ww_schaetzung` (`e_ww_schaetz_kwh`). Die Nutzwärme nimmt den grösseren der beiden Werte.
+
+Optional rechnet **Methode E** (`kennlinie_wp`) die Heizwärme aus Laufzeit × Heizleistung, abhängig
+von der Soletemperatur `t_quelle`. Das ist ein Gegencheck ohne Durchflussmessung.
+
+**FBH-Stellantriebe** (`fbh_flow.stellantriebe`): Bei ungeregelter Pumpe hängt der Durchfluss an der
+Ventilöffnung. Unter `min_oeffnung_pct` (30 %) im Mittel zählt die FBH-Wärme als
+`e_fbh_unsicher` und nicht in Bilanz und Abdeckung. Mit einer gemessenen `kennlinie` wird der
+Durchfluss aus der Öffnung interpoliert.
+
 ## Was publiziert wird
 
 | Topic | Inhalt |
@@ -87,9 +122,12 @@ zeigt trotzdem, wie alt der letzte Wert ist. Für Quellen, die periodisch senden
 | `heizung/calc/p_wp_kw` | Leistung WP-Seite (C) |
 | `heizung/calc/e_speicher_kwh` | Energieinhalt des Speichers über `t_ref` |
 | `heizung/calc/e_*_kwh` | fortlaufende Zählerstände, retained |
+| `heizung/calc/laufzeit_heiz_h`, `laufzeit_ww_h`, `starts` | Betriebszähler, retained |
 | `heizung/heute/<feld>` | laufender Tag bis jetzt, gleiche Felder wie die Tageswerte (z.B. `az_system`, `nutzwaerme_kwh`, `e_el_wp_kwh`) |
 | `heizung/diag/methode_<m>` | 1 = Methode rechnet gerade, 0 = Eingänge fehlen |
 | `heizung/diag/alter_<eingang>` | Alter des letzten Werts in s (−1 = noch nie empfangen) |
+| `heizung/diag/stromklasse` | 0 Standby, 1 Phase noch offen, 2 Begleitheizung, 3 Verdichter Heizen, 4 Verdichter WW |
+| `heizung/diag/fbh_oeffnung_pct`, `fbh_unsicher` | mittlere Stellantrieb-Öffnung, 1 = FBH-Wärme unsicher |
 | `heizung/diag/fehlende_eingaenge` | Anzahl fehlender Eingänge (nie empfangen bzw. Watchdog abgelaufen) |
 | `heizung/status/waerme_calc_fehlend` | JSON-Liste der fehlenden Eingänge, retained |
 | `heizung/tag/json` | Tageswerte, ein JSON pro Tag kurz nach Mitternacht |
@@ -101,6 +139,16 @@ pro Zähler, `t_aussen_mittel`, `de_speicher_kwh`, `nutzwaerme_kwh`, `az_system`
 inklusive Speicheränderung geteilt durch Strom), `az_wp`, `verlust_kwh` (nur mit WP-Durchfluss),
 `verhaeltnis_fbh_flaeche`, `verhaeltnis_fbh_prim` und `abdeckung_*`. Die Abdeckung ist der Anteil
 des Tages mit gültigen Daten. Tage mit weniger als 0.9 ignoriert die Analyse.
+
+Mit Stromaufteilung zusätzlich: `e_el_bh_kwh`, `e_el_heiz_kwh`, `e_el_ww_kwh`, `e_el_rest_kwh`,
+`laufzeit_heiz_h`, `laufzeit_ww_h`, `starts`, `anteil_bh`, `anteil_ww_el`, `e_ww_schaetz_kwh` und
+**`az_wp_netto`** (Nutzwärme durch Strom ohne Begleitheizung, die empfohlene Hauptkennzahl).
+Mit `kennlinie_wp` auch `e_kennlinie_heiz_kwh` und `az_kennlinie`.
+
+`luecke_strom_kwh` > 0 heisst: Der Stromzähler ist auf einmal um mehr als `luecke_strom_kwh`
+(1 kWh) gesprungen, eine Lücke wurde nachgeholt. `analyse.py` lässt solche Tage weg und rechnet
+die 7-Tage-Arbeitszahlen energiegewichtet (Summe Wärme durch Summe Strom) nur aus Tagen mit
+`abdeckung_fbh` ≥ 0.95. Kommen neue Spalten dazu, stellt der Dienst `tageswerte.csv` einmalig um.
 
 Die Zählerstände liegen in `/var/lib/waermemonitor/state.json` und überstehen einen Neustart. Die
 Historie für die Analyse steht in `tageswerte.csv`.
