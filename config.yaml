@@ -30,7 +30,7 @@ calc:
   # Eingefroren: läuft die Pumpe, ändern sich VL oder RL aber seit so vielen Sekunden
   # nicht mehr, gilt der Kreis als ungültig (Quelle hängt, sendet evtl. denselben
   # Haltewert immer wieder). Gilt sinngemäss auch für wp_el_w. null = aus.
-  eingefroren_s: 900
+  eingefroren_s: 1800         # 30 min; bei durchlaufender Pumpe und 1/16 K Auflösung nicht kürzer
   # Anlaufzeit pro Kreis: so lange nach dem Pumpenstart nicht integrieren, bis die
   # Fühler stationär messen (z.B. träge Primärfühler).
   anlauf_s: {}

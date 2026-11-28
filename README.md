@@ -81,7 +81,7 @@ zeigt trotzdem, wie alt der letzte Wert ist. Für Quellen, die periodisch senden
 `max_age_s` bzw. `max_age_pro_eingang` ein Höchstalter als Watchdog setzen.
 
 **Eingefrorene Werte** erkennt der Dienst trotzdem: Läuft eine Pumpe, ändern sich Vor- oder
-Rücklauf aber seit `eingefroren_s` (900 s) nicht mehr, gilt der Kreis als ungültig. Das greift
+Rücklauf aber seit `eingefroren_s` (1800 s) nicht mehr, gilt der Kreis als ungültig. Das greift
 auch, wenn eine Quelle denselben Haltewert immer wieder sendet. Dasselbe gilt für die
 Momentanleistung `wp_el_w`, wenn sie über der Standby-Schwelle stehen bleibt.
 

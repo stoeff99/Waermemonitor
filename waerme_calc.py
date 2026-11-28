@@ -196,7 +196,7 @@ class Calculator:
         self.tick_s = float(self.c.get("tick_s", 10))
         max_age = self.c.get("max_age_s")
         self.inp = Inputs(None if max_age is None else float(max_age), self._max_age_spec())
-        frozen = self.c.get("eingefroren_s", 900)
+        frozen = self.c.get("eingefroren_s", 1800)
         self.frozen_s = None if frozen is None else float(frozen)
         self.lock = threading.RLock()  # MQTT-Thread (handle_message) und Hauptschleife (tick)
         st = state or {}
